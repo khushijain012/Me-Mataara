@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 
 export function LoginPage() {
   const navigate = useNavigate()
-  const { profile, login } = useApp()
+  const { profile, login, loginWithSso, auth } = useApp()
 
   const [mobile, setMobile] = useState('')
   const [password, setPassword] = useState('')
@@ -34,6 +34,17 @@ export function LoginPage() {
     }
   }
 
+  async function signInWithCircle() {
+    setError(null)
+    setBusy(true)
+    try {
+      await loginWithSso() // redirects to Circle's hosted auth
+    } catch {
+      setBusy(false)
+      setError('Could not reach Circle sign-in. Please try again shortly.')
+    }
+  }
+
   return (
     <div className="relative flex min-h-screen flex-col bg-pounamu-900 bg-weave text-white">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-pounamu-800/40 via-pounamu-900 to-pounamu-950" />
@@ -49,8 +60,9 @@ export function LoginPage() {
           </p>
         </div>
 
-        {/* Card */}
-        <form onSubmit={submit} className="mt-8 rounded-3xl bg-white/95 p-6 text-ink shadow-float backdrop-blur">
+        {/* Card — password form (mock) or Circle SSO handoff */}
+        {auth.passwordLogin ? (
+          <form onSubmit={submit} className="mt-8 rounded-3xl bg-white/95 p-6 text-ink shadow-float backdrop-blur">
           <div className="mb-5 flex items-center gap-2 text-pounamu-700">
             <Phone className="h-5 w-5" />
             <p className="font-display text-lg font-semibold">Sign in</p>
@@ -116,7 +128,43 @@ export function LoginPage() {
               <span className="font-semibold text-ink">{profile.mobile}</span>.
             </p>
           )}
-        </form>
+          </form>
+        ) : (
+          <div className="mt-8 rounded-3xl bg-white/95 p-6 text-ink shadow-float backdrop-blur">
+            <div className="mb-2 flex items-center gap-2 text-pounamu-700">
+              <Phone className="h-5 w-5" />
+              <p className="font-display text-lg font-semibold">Sign in</p>
+            </div>
+            <p className="text-sm text-ink-faint">
+              Your NQR account is managed in Circle — the Me Mataara platform. Sign in there to
+              continue.
+            </p>
+
+            {error && (
+              <p className="mt-3 flex items-center gap-1.5 text-sm font-medium text-kokowai-700">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                {error}
+              </p>
+            )}
+
+            <Button
+              type="button"
+              block
+              size="lg"
+              className="mt-5"
+              onClick={signInWithCircle}
+              disabled={busy}
+              icon={<ArrowRight className="h-5 w-5" />}
+            >
+              {busy ? 'Redirecting…' : 'Sign in with Circle'}
+            </Button>
+
+            <p className="mt-4 text-center text-xs text-ink-faint">
+              Don’t have an account? Ask your supervisor or platform admin — accounts are created in
+              Circle.
+            </p>
+          </div>
+        )}
 
         <p className="relative mt-6 text-center text-xs text-pounamu-200/70">Funded by ACC · Part of Me Mataara</p>
       </div>

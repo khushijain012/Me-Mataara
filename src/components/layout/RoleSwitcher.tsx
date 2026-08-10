@@ -11,7 +11,7 @@ const ROLES: Role[] = ['worker', 'supervisor', 'admin']
 
 /** Demo-only affordance: switch between roles to explore each experience. */
 export function RoleSwitcher() {
-  const { role, setRole, logout } = useApp()
+  const { role, setRole, logout, auth } = useApp()
   const [open, setOpen] = useState(false)
   const navigate = useNavigate()
 
@@ -43,22 +43,35 @@ export function RoleSwitcher() {
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute right-0 z-20 mt-2 w-56 origin-top-right animate-scale-in rounded-2xl bg-white p-1.5 shadow-float ring-1 ring-black/5">
-            <p className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-ink-faint">
-              Demo · switch role
-            </p>
-            {ROLES.map((r) => (
-              <button
-                key={r}
-                onClick={() => pick(r)}
-                className={cn(
-                  'flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm hover:bg-sand-50',
-                  r === role && 'bg-sand-50',
-                )}
-              >
-                <span className="font-medium text-ink">{ROLE_LABEL[r]}</span>
-                {r === role && <Check className="h-4 w-4 text-pounamu-600" />}
-              </button>
-            ))}
+            {/* Role is fixed by the Circle hierarchy; switching is a demo-only
+                affordance in the mock. */}
+            {auth.allowsRoleSwitch ? (
+              <>
+                <p className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-ink-faint">
+                  Demo · switch role
+                </p>
+                {ROLES.map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => pick(r)}
+                    className={cn(
+                      'flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm hover:bg-sand-50',
+                      r === role && 'bg-sand-50',
+                    )}
+                  >
+                    <span className="font-medium text-ink">{ROLE_LABEL[r]}</span>
+                    {r === role && <Check className="h-4 w-4 text-pounamu-600" />}
+                  </button>
+                ))}
+              </>
+            ) : (
+              <div className="flex items-center justify-between rounded-xl px-3 py-2.5">
+                <span className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">
+                  Signed in as
+                </span>
+                <span className="text-sm font-semibold text-ink">{ROLE_LABEL[role]}</span>
+              </div>
+            )}
 
             <div className="my-1 border-t border-black/5" />
             {[

@@ -14,7 +14,6 @@ import type {
   Concern,
   ConcernStatus,
   ErrorLog,
-  Gender,
   HazardCategory,
   RegisteredProfile,
   Role,
@@ -30,26 +29,28 @@ import {
   SUPERVISOR_PROMPTS,
   USERS,
 } from '@/lib/mockData'
-import { ageBandFromDob, ageFromDob, hashPassword, nextId } from '@/lib/utils'
+import {
+  identity,
+  toAppRole,
+  USE_MOCK,
+  type HierarchyIdentity,
+  type RegisterDraft,
+  type SupervisorOption,
+} from '@/lib/identity'
+import { ageBandFromDob, ageFromDob, nextId } from '@/lib/utils'
 
 const LS_KEY = 'nqr.session'
 
-// What RegisterPage submits — the raw password is hashed here and never stored.
-export interface RegisterInput {
-  firstName: string
-  lastName: string
-  dob: string
-  gender: Gender
-  industry: string
-  mobile: string
-  email: string
-  isHSR: boolean
-  workerNumber?: string
-  nzbn: string
-  organisation: string
-  supervisorId?: string
-  supervisorName?: string
-  password: string
+// What RegisterPage submits. Identity/hierarchy (incl. password handling under
+// mock) now lives behind the identity provider — see src/lib/identity.
+export type RegisterInput = RegisterDraft
+
+/** Auth/hierarchy capabilities the UI adapts to (sourced from the provider). */
+export interface AuthCapabilities {
+  kind: 'mock' | 'circle'
+  passwordLogin: boolean
+  managesAccounts: boolean
+  allowsRoleSwitch: boolean
 }
 
 // Doc §3/§4: the worker picks risk(s) from the fixed list, adds a short
@@ -68,7 +69,12 @@ interface AppState {
   profile: RegisteredProfile | null
   register: (input: RegisterInput) => Promise<void>
   login: (mobile: string, password: string) => Promise<boolean>
+  loginWithSso: () => Promise<void>
   logout: () => void
+
+  // Identity/hierarchy — sourced from Circle (or the mock) via the provider.
+  auth: AuthCapabilities
+  supervisors: SupervisorOption[]
 
   role: Role
   setRole: (r: Role) => void
@@ -130,11 +136,46 @@ function loadSession(): Persisted {
 
 const nowIso = () => new Date().toISOString()
 
+/** Project a provider identity onto the local domain profile shape. */
+function identityToProfile(id: HierarchyIdentity): RegisteredProfile {
+  return {
+    memberId: id.memberId,
+    role: toAppRole(id.circleRole),
+    circleRole: id.circleRole,
+    firstName: id.firstName,
+    lastName: id.lastName,
+    dob: id.dob ?? '',
+    age: id.dob ? ageFromDob(id.dob) : 0,
+    ageBand: id.dob ? ageBandFromDob(id.dob) : 'Unknown',
+    gender: id.gender ?? '',
+    industry: id.industry ?? '',
+    mobile: id.mobile,
+    email: id.email,
+    isHSR: id.isHSR ?? false,
+    workerNumber: id.workerNumber,
+    nzbn: id.nzbn ?? '',
+    organisation: id.organisation ?? id.companyName ?? '',
+    companyId: id.companyId,
+    companyName: id.companyName,
+    verificationStatus: 'verified',
+    supervisorId: id.supervisorId ?? DEFAULT_SUPERVISOR.id,
+    supervisorName: id.supervisorName ?? DEFAULT_SUPERVISOR.name,
+  }
+}
+
+const AUTH_CAPABILITIES: AuthCapabilities = {
+  kind: identity.kind,
+  passwordLogin: identity.supportsPasswordLogin,
+  managesAccounts: identity.managesAccounts,
+  allowsRoleSwitch: identity.allowsRoleSwitch,
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const initial = loadSession()
   const [authed, setAuthed] = useState(initial.authed)
   const [profile, setProfile] = useState<RegisteredProfile | null>(initial.profile)
-  const [role, setRole] = useState<Role>('worker')
+  const [role, setRole] = useState<Role>(initial.profile?.role ?? 'worker')
+  const [supervisors, setSupervisors] = useState<SupervisorOption[]>([])
   const [concerns, setConcerns] = useState<Concern[]>(
     initial.concerns?.length ? initial.concerns : CONCERNS,
   )
@@ -186,6 +227,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
       /* quota / private mode — ignore */
     }
   }, [authed, profile, concerns, syncEvents, errorLogs, notifications, lastSyncAt, hazards, prompts])
+
+  // ---- Load the supervisor list from the provider (Circle or mock) ----
+  useEffect(() => {
+    let live = true
+    identity
+      .listSupervisors()
+      .then((s) => live && setSupervisors(s))
+      .catch(() => live && setSupervisors([]))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  // ---- Under Circle, restore the session from the token (Circle owns login).
+  // Under mock the session is restored synchronously from localStorage above. ----
+  useEffect(() => {
+    if (USE_MOCK) return
+    let live = true
+    identity.getMe().then((id) => {
+      if (live && id) {
+        const p = identityToProfile(id)
+        setProfile(p)
+        setRole(p.role)
+        setAuthed(true)
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [])
 
   // ---- Sync: flush the offline queue and record a timestamped result ----
   const syncOfflineConcerns = useCallback(() => {
@@ -263,6 +334,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const n = Number(c.ref.replace('HZ-', ''))
         return Number.isFinite(n) && n > max ? n : max
       }, 1042)
+      // Routing target = the Worker→Supervisor edge. Owned by Circle and read
+      // off the profile; falls back to the default supervisor if unclaimed.
       const supervisorId = profile?.supervisorId ?? DEFAULT_SUPERVISOR.id
       const supervisorName = profile?.supervisorName ?? DEFAULT_SUPERVISOR.name
       const concern: Concern = {
@@ -274,7 +347,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         status: 'open',
         sceneDate: input.sceneDate,
         reportedBy: displayName,
-        reportedById: profile ? 'u-self' : USERS.worker.id,
+        reportedById: profile?.memberId ?? USERS.worker.id,
         reportedAnonymous: input.reportedAnonymous,
         reportedAt: at,
         // Routed directly to the worker's linked supervisor (one per concern)
@@ -390,49 +463,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
   }, [])
 
+  // Provisioning goes through the identity provider. Under mock this creates a
+  // device-local account; under Circle accounts are managed upstream and this
+  // path is disabled (the register screen short-circuits before calling it).
   const register = useCallback(async (input: RegisterInput) => {
-    const passwordHash = await hashPassword(input.password)
-    const p: RegisteredProfile = {
-      firstName: input.firstName,
-      lastName: input.lastName,
-      dob: input.dob,
-      age: ageFromDob(input.dob),
-      ageBand: ageBandFromDob(input.dob),
-      gender: input.gender,
-      industry: input.industry,
-      mobile: input.mobile,
-      email: input.email,
-      isHSR: input.isHSR,
-      workerNumber: input.workerNumber?.trim() || undefined,
-      nzbn: input.nzbn,
-      organisation: input.organisation,
-      passwordHash,
-      verificationStatus: 'verified',
-      // Doc §5: worker claims their supervisor at setup; if skipped they stay
-      // "unclaimed" but concerns still route to the default supervisor.
-      supervisorId: input.supervisorId || DEFAULT_SUPERVISOR.id,
-      supervisorName: input.supervisorName || DEFAULT_SUPERVISOR.name,
-    }
+    const id = await identity.register(input)
+    const p = identityToProfile(id)
     setProfile(p)
+    setRole(p.role)
     setAuthed(true)
   }, [])
 
-  const login = useCallback(
-    async (mobile: string, password: string): Promise<boolean> => {
-      if (!profile) return false
-      const hash = await hashPassword(password)
-      const mobileMatch = profile.mobile.replace(/\s/g, '') === mobile.replace(/\s/g, '')
-      if (mobileMatch && profile.passwordHash === hash) {
-        setProfile({ ...profile, verificationStatus: 'verified' })
-        setAuthed(true)
-        return true
-      }
-      return false
-    },
-    [profile],
-  )
+  // Provisional password sign-in (mock only). The Circle path uses SSO.
+  const login = useCallback(async (mobile: string, password: string): Promise<boolean> => {
+    const id = await identity.authenticatePassword(mobile, password)
+    if (!id) return false
+    const p = identityToProfile(id)
+    setProfile(p)
+    setRole(p.role)
+    setAuthed(true)
+    return true
+  }, [])
+
+  // Circle SSO — hands off to Circle's hosted auth (redirect).
+  const loginWithSso = useCallback(async () => {
+    await identity.beginSso()
+  }, [])
 
   const logout = useCallback(() => {
+    void identity.logout()
     setAuthed(false)
     setRole('worker')
   }, [])
@@ -449,7 +508,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       profile,
       register,
       login,
+      loginWithSso,
       logout,
+      auth: AUTH_CAPABILITIES,
+      supervisors,
       role,
       setRole,
       user,
@@ -482,7 +544,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       profile,
       register,
       login,
+      loginWithSso,
       logout,
+      supervisors,
       role,
       user,
       displayName,

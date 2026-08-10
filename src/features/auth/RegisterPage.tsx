@@ -16,7 +16,7 @@ import {
 import { Logo } from '@/components/layout/Logo'
 import { Button, Field, Input, Select, Toggle, ProgressBar } from '@/components/ui'
 import { useApp, type RegisterInput } from '@/context/AppContext'
-import { NZBN_LOOKUP_URL, NZ_INDUSTRIES, SUPERVISORS, searchNzbnByName } from '@/lib/mockData'
+import { ME_MATAARA_URL, NZBN_LOOKUP_URL, NZ_INDUSTRIES, searchNzbnByName } from '@/lib/mockData'
 import type { Gender } from '@/lib/types'
 import { ageFromDob } from '@/lib/utils'
 import { cn } from '@/lib/utils'
@@ -25,7 +25,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export function RegisterPage() {
   const navigate = useNavigate()
-  const { register } = useApp()
+  const { register, auth, supervisors } = useApp()
   const [step, setStep] = useState(0)
   const [busy, setBusy] = useState(false)
 
@@ -96,13 +96,42 @@ export function RegisterPage() {
       nzbn,
       organisation: organisation.trim(),
       supervisorId: supervisorId || undefined,
-      supervisorName: SUPERVISORS.find((s) => s.id === supervisorId)?.name,
+      supervisorName: supervisors.find((s) => s.id === supervisorId)?.name,
       password,
     }
     setBusy(true)
     await register(input) // hashes the password before it is ever stored
     setBusy(false)
     navigate('/')
+  }
+
+  // Client decision: accounts are created + managed in Circle. When the provider
+  // doesn't manage accounts in-app, there's nothing to register here — point the
+  // user to Circle instead of collecting details the PWA can't own.
+  if (!auth.managesAccounts) {
+    return (
+      <div className="relative flex min-h-screen flex-col items-center justify-center bg-sand-50 bg-weave px-6 safe-top safe-bottom">
+        <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-float ring-1 ring-black/5">
+          <Logo className="mx-auto h-14 w-14" />
+          <h1 className="mt-5 font-display text-2xl font-bold text-ink">Accounts live in Circle</h1>
+          <p className="mt-2 text-sm text-ink-soft">
+            NQR accounts are created and managed in Circle — the Me Mataara platform. Once your
+            account exists there, sign in with Circle to use NQR.
+          </p>
+          <a
+            href={ME_MATAARA_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-6 inline-flex items-center gap-1.5 text-sm font-semibold text-pounamu-700 hover:underline"
+          >
+            <ExternalLink className="h-4 w-4" /> Open Me Mataara on Circle
+          </a>
+          <Button block size="lg" className="mt-6" onClick={() => navigate('/login')} icon={<ArrowLeft className="h-5 w-5" />}>
+            Back to sign in
+          </Button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -243,11 +272,13 @@ export function RegisterPage() {
               <Field label="Your supervisor" hint="Claim your supervisor so your concerns reach the right person. You can set this later.">
                 <Select value={supervisorId} onChange={(e) => setSupervisorId(e.target.value)}>
                   <option value="">Choose later</option>
-                  {SUPERVISORS.filter((s) => s.approval === 'approved').map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} · {s.crew}
-                    </option>
-                  ))}
+                  {supervisors
+                    .filter((s) => s.approval === 'approved')
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} · {s.crew}
+                      </option>
+                    ))}
                 </Select>
               </Field>
 

@@ -1,5 +1,9 @@
 export type Role = 'worker' | 'supervisor' | 'admin'
 
+// Circle's four-tier hierarchy (system of record = Circle). Mapped onto the
+// app's three UI roles by `toAppRole` in src/lib/identity.
+export type CircleRole = 'platform_owner' | 'company_owner' | 'supervisor' | 'worker'
+
 export interface User {
   id: string
   name: string
@@ -88,6 +92,9 @@ export type Gender = 'female' | 'male' | 'gender_diverse' | 'prefer_not' | ''
 export type VerificationStatus = 'unverified' | 'verified'
 
 export interface RegisteredProfile {
+  memberId: string // Circle member id (system of record); mirrored locally
+  role: Role // resolved UI role (mapped from the Circle tier)
+  circleRole: CircleRole // the Circle hierarchy tier this member sits at
   firstName: string
   lastName: string
   dob: string // ISO date
@@ -101,9 +108,11 @@ export interface RegisteredProfile {
   workerNumber?: string // doc §1: optional, never blocks registration
   nzbn: string // stored behind the company-name lookup (doc §1)
   organisation: string
-  passwordHash: string // password stored encrypted (SHA-256 hash, never plaintext)
+  companyId?: string | null // Circle company/org id (Company Owner tier)
+  companyName?: string | null
+  passwordHash?: string // provisional mock sign-in only — Circle uses SSO tokens
   verificationStatus: VerificationStatus
-  supervisorId: string // doc §5: worker claims their supervisor
+  supervisorId: string // Worker→Supervisor edge (Circle-owned; read-only in PWA)
   supervisorName: string
 }
 

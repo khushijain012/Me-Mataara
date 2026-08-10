@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ResponsiveContainer,
@@ -11,7 +11,8 @@ import {
 } from 'recharts'
 import { TrendingUp, Timer, CheckCircle2, MessageSquareReply, ChevronRight, EyeOff, UserPlus } from 'lucide-react'
 import { useApp } from '@/context/AppContext'
-import { categoryById, CREW } from '@/lib/mockData'
+import { categoryById } from '@/lib/mockData'
+import { identity, type CrewMember } from '@/lib/identity'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { SectionTitle, StatusBadge, Avatar } from '@/components/ui'
 import { cn, timeAgo } from '@/lib/utils'
@@ -29,9 +30,28 @@ export function WeeklyReview() {
   const { concerns, user } = useApp()
 
   // Doc: the supervisor sees their claimed crew; unclaimed workers stay visible
-  // so the gaps can be chased.
-  const myCrew = CREW.filter((c) => c.supervisorId === user.id)
-  const unclaimed = CREW.filter((c) => c.supervisorId === null)
+  // so the gaps can be chased. The crew comes from Circle's hierarchy (via the
+  // identity provider) — the PWA only reads it.
+  const [myCrew, setMyCrew] = useState<CrewMember[]>([])
+  const [unclaimed, setUnclaimed] = useState<CrewMember[]>([])
+  useEffect(() => {
+    let live = true
+    identity
+      .listCrew(user.id)
+      .then((r) => {
+        if (!live) return
+        setMyCrew(r.crew)
+        setUnclaimed(r.unclaimed)
+      })
+      .catch(() => {
+        if (!live) return
+        setMyCrew([])
+        setUnclaimed([])
+      })
+    return () => {
+      live = false
+    }
+  }, [user.id])
 
   // Doc: supervisor toolbox view = a rolling four-week window, most recent first.
   const recent = useMemo(() => {
@@ -90,7 +110,7 @@ export function WeeklyReview() {
         <div className="flex flex-wrap gap-2">
           {myCrew.map((c) => (
             <span key={c.name} className="inline-flex items-center gap-2 rounded-full bg-sand-100 py-1 pl-1 pr-3">
-              <Avatar initials={c.initials} color={c.color} size="sm" />
+              <Avatar initials={c.initials} color={c.color ?? 'bg-pounamu-600'} size="sm" />
               <span className="text-sm font-medium text-ink">{c.name}</span>
             </span>
           ))}
