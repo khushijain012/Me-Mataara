@@ -12,13 +12,15 @@ import {
   CalendarCheck,
   Timer,
   ShieldCheck,
+  EyeOff,
 } from 'lucide-react'
 import { useApp } from '@/context/AppContext'
+import type { Role } from '@/lib/types'
 import { categoryById, promptById } from '@/lib/mockData'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Avatar, Button, StatusBadge, Textarea, Badge, Select } from '@/components/ui'
 import { ROLE_LABEL, USERS } from '@/lib/mockData'
-import { formatDateTime, timeAgo } from '@/lib/utils'
+import { cn, formatDateTime, timeAgo } from '@/lib/utils'
 
 function formatHours(h?: number) {
   if (h == null) return '—'
@@ -55,6 +57,64 @@ export function ConcernDetail() {
   const risks = (concern.riskIds?.length ? concern.riskIds : [concern.categoryId])
     .map((id) => categoryById(id))
     .filter(Boolean)
+
+  // One unified activity feed: original concern + every supervisor/worker update
+  // + a synthesised "closed" event (closing doesn't create an action). Sorted
+  // newest-first so the latest update sits at the top and the original concern
+  // (oldest) sits at the bottom.
+  type TimelineEvent = {
+    id: string
+    at: string
+    name: string
+    role: Role
+    roleLabel: string
+    message: string
+    kind: 'concern' | 'update' | 'closed'
+    anonymous?: boolean
+  }
+  const timeline: TimelineEvent[] = [
+    {
+      id: `concern-${concern.id}`,
+      at: concern.reportedAt,
+      name: reporterName,
+      role: 'worker' as Role,
+      roleLabel: ROLE_LABEL.worker,
+      message: concern.description?.trim() || 'Raised this concern.',
+      kind: 'concern' as const,
+      anonymous: concern.reportedAnonymous,
+    },
+    ...concern.actions.map<TimelineEvent>((a) => ({
+      id: a.id,
+      at: a.at,
+      name: a.author,
+      role: a.role,
+      roleLabel: ROLE_LABEL[a.role],
+      message: a.message,
+      kind: 'update',
+    })),
+    ...(concern.status === 'closed'
+      ? [
+          {
+            id: `closed-${concern.id}`,
+            at: concern.closedAtIso ?? concern.reportedAt,
+            name: concern.assignedTo || ROLE_LABEL.supervisor,
+            role: 'supervisor' as Role,
+            roleLabel: ROLE_LABEL.supervisor,
+            message: concern.riskReduction?.trim()
+              ? `Reduction in risk: ${concern.riskReduction.trim()}`
+              : 'The concern has been actioned and closed.',
+            kind: 'closed' as const,
+          },
+        ]
+      : []),
+  ].sort((a, b) => {
+    const dt = new Date(b.at).getTime() - new Date(a.at).getTime()
+    if (dt !== 0) return dt
+    // Tie-break: closing is terminal, so it stays on top; the original
+    // concern is the origin, so it stays at the bottom.
+    const rank = { closed: 2, update: 1, concern: 0 }
+    return rank[b.kind] - rank[a.kind]
+  })
 
   function respond() {
     const preset = promptById(promptId)
@@ -210,48 +270,67 @@ export function ConcernDetail() {
         </div>
       )}
 
-      {/* Timeline */}
+      {/* Activity timeline — newest at top, original concern (oldest) at bottom */}
       <div className="mt-6">
         <h2 className="mb-4 font-display text-lg font-semibold text-ink">Activity</h2>
         <ol className="relative space-y-5 border-l-2 border-sand-200 pl-6">
-          {concern.actions.map((a) => {
-            const u = USERS[a.role]
+          {timeline.map((ev) => {
+            const u = USERS[ev.role]
+            const roleTone =
+              ev.kind === 'closed'
+                ? 'text-pounamu-700'
+                : ev.role === 'worker'
+                  ? 'text-kokowai-600'
+                  : 'text-pounamu-600'
             return (
-              <li key={a.id} className="relative">
-                <span className="absolute -left-[31px] top-1 grid h-6 w-6 place-items-center rounded-full bg-white ring-2 ring-sand-200">
-                  <Avatar initials={u.initials} color={u.avatarColor} size="sm" />
+              <li key={ev.id} className="relative">
+                {/* Single timeline node per event */}
+                <span
+                  className={cn(
+                    'absolute -left-[31px] top-1 grid h-6 w-6 place-items-center rounded-full ring-2',
+                    ev.kind === 'closed'
+                      ? 'bg-pounamu-500 ring-white'
+                      : ev.anonymous
+                        ? 'bg-kokowai-500 ring-white'
+                        : 'bg-white ring-sand-200',
+                  )}
+                >
+                  {ev.kind === 'closed' ? (
+                    <CheckCircle2 className="h-4 w-4 text-white" />
+                  ) : ev.anonymous ? (
+                    <EyeOff className="h-3.5 w-3.5 text-white" />
+                  ) : (
+                    <Avatar initials={u.initials} color={u.avatarColor} size="sm" />
+                  )}
                 </span>
-                <div className="rounded-2xl bg-white p-4 shadow-card ring-1 ring-black/5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-ink">{a.author}</p>
-                    <span className="text-xs text-ink-faint">{formatDateTime(a.at)}</span>
+
+                <div
+                  className={cn(
+                    'rounded-2xl p-4 ring-1',
+                    ev.kind === 'closed'
+                      ? 'bg-pounamu-50 ring-pounamu-100'
+                      : ev.kind === 'concern'
+                        ? 'bg-sand-50 ring-black/5'
+                        : 'bg-white shadow-card ring-black/5',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="truncate text-sm font-semibold text-ink">{ev.name}</p>
+                    <span className="shrink-0 text-xs text-ink-faint">{formatDateTime(ev.at)}</span>
                   </div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-pounamu-600">
-                    {ROLE_LABEL[a.role]}
+                  <p className={cn('text-[11px] font-medium uppercase tracking-wide', roleTone)}>
+                    {ev.kind === 'closed' ? `Closed · ${ev.roleLabel}` : ev.roleLabel}
                   </p>
-                  <p className="mt-2 text-sm text-ink-soft">{a.message}</p>
-                  {/* Doc §4: which prompt/response was used */}
-                  <span className="mt-2 inline-block">
-                    <Badge tone={a.responseType === 'preset' ? 'green' : 'neutral'}>
-                      {a.responseType === 'preset' ? 'Preset prompt' : 'Custom message'}
-                    </Badge>
-                  </span>
+                  {ev.kind === 'closed' && (
+                    <p className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-pounamu-800">
+                      <ShieldCheck className="h-4 w-4 shrink-0" /> Concern resolved &amp; closed
+                    </p>
+                  )}
+                  <p className="mt-2 text-sm text-ink-soft">{ev.message}</p>
                 </div>
               </li>
             )
           })}
-
-          <li className="relative">
-            <span className="absolute -left-[29px] top-1 h-4 w-4 rounded-full bg-kokowai-500 ring-2 ring-white" />
-            <div className="rounded-2xl bg-sand-50 p-4 ring-1 ring-black/5">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-ink">{reporterName}</p>
-                <span className="text-xs text-ink-faint">{formatDateTime(concern.reportedAt)}</span>
-              </div>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-kokowai-600">Raised the concern</p>
-              {concern.description && <p className="mt-2 text-sm text-ink-soft">{concern.description}</p>}
-            </div>
-          </li>
         </ol>
       </div>
     </div>
