@@ -289,14 +289,16 @@ export function Toggle({
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={cn(
-        'focus-ring relative h-6 w-11 shrink-0 rounded-full transition-colors',
-        checked ? 'bg-pounamu-600' : 'bg-sand-300',
+        'focus-ring relative h-6 w-11 shrink-0 rounded-full ring-1 ring-inset transition-colors duration-200 ease-out',
+        // ON: brand Green Stone (#4F878F = pounamu-500). OFF: muted, empty track.
+        checked ? 'bg-pounamu-500 ring-black/5' : 'bg-sand-300 ring-black/[0.06]',
       )}
     >
+      {/* Clean circular thumb — no outline/ring, just a subtle depth shadow. */}
       <span
         className={cn(
-          'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform',
-          checked ? 'translate-x-[22px]' : 'translate-x-0.5',
+          'absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-[0_1px_2px_rgba(64,64,64,0.25)] transition-transform duration-200 ease-out',
+          checked ? 'translate-x-5' : 'translate-x-0',
         )}
       />
     </button>
