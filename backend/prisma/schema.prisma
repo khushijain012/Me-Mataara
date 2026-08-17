@@ -1,0 +1,586 @@
+// NQR domain backend — schema v2 (clean, normalised).
+// See docs/db-design.md for the design rationale.
+//
+// Conventions (every table):
+//   • snake_case tables/columns (via @@map / @map); Prisma fields stay idiomatic.
+//   • universal columns: is_active (#9), is_disabled (#10), is_deleted (#11),
+//     created_at/by, updated_at/by, deleted_at/by (audit #13).
+//   • soft delete + field-level audit_log are applied centrally by the Prisma
+//     client extension in src/prisma.ts — routes never repeat that logic.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── enums ───────────────────────────
+enum CircleRole {
+  platform_owner
+  company_owner
+  supervisor
+  worker
+}
+
+enum AppRole {
+  worker
+  supervisor
+  admin
+}
+
+enum ConcernStatus {
+  open
+  in_progress
+  closed
+}
+
+enum ResponseType {
+  preset
+  custom
+}
+
+enum CaptureStatus {
+  captured
+  queued
+  synced
+  failed
+}
+
+enum Approval {
+  approved
+  awaiting_approval
+}
+
+enum Gender {
+  female
+  male
+  gender_diverse
+  prefer_not
+}
+
+enum NotificationKind {
+  new_concern
+  status
+  reminder
+  closed
+}
+
+enum SyncResult {
+  success
+  failure
+}
+
+enum AuditAction {
+  insert
+  update
+  delete
+}
+
+// ─────────────────────────── master / reference tables (#1) ───────────────────────────
+model SystemRole {
+  id      String       @id @default(cuid())
+  code    String       @unique // worker | supervisor | company_owner | platform_owner
+  name    String
+  members MemberRole[]
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("system_role")
+}
+
+model MediaType {
+  id            String       @id @default(cuid())
+  code          String       @unique // doc | video | audio
+  name          String
+  storageFolder String       @map("storage_folder") // storage/<folder>/ (#5)
+  mimeTypes     MimeType[]
+  assets        MediaAsset[]
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("media_type")
+}
+
+model MimeType {
+  id          String       @id @default(cuid())
+  code        String       @unique // e.g. video/mp4, audio/mpeg, application/pdf
+  extension   String // mp4 | mp3 | pdf ...
+  mediaTypeId String       @map("media_type_id")
+  mediaType   MediaType    @relation(fields: [mediaTypeId], references: [id])
+  assets      MediaAsset[]
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("mime_type")
+}
+
+model QuickLinkType {
+  id    String      @id @default(cuid())
+  code  String      @unique // docs | videos
+  name  String
+  links QuickLink[]
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("quick_link_type")
+}
+
+model HazardCategory {
+  id           String        @id
+  label        String
+  maoriLabel   String?       @map("maori_label")
+  icon         String        @default("")
+  image        String        @default("") @map("data_url") // category image as a data URL (#8)
+  tint         String        @default("pounamu")
+  description  String        @default("")
+  sortOrder    Int           @default(0) @map("sort_order")
+  concernRisks ConcernRisk[]
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("hazard_category")
+}
+
+model SupervisorPrompt {
+  id        String             @id
+  label     String
+  sortOrder Int                @default(0) @map("sort_order")
+  actions   CorrectiveAction[]
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("supervisor_prompt")
+}
+
+model AkoKorero {
+  id        String @id
+  title     String
+  body      String
+  sortOrder Int    @default(0) @map("sort_order")
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("ako_korero")
+}
+
+// ─────────────────────────── identity (#3, #7) ───────────────────────────
+model Company {
+  id       String   @id @default(cuid())
+  nzbn     String   @unique
+  name     String
+  sites    Int      @default(1)
+  adoption Int      @default(0)
+  members  Member[]
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("company")
+}
+
+model Member {
+  id           String  @id @default(cuid())
+  circleId     String? @unique @map("circle_id") // maps user → Circle identity (#3)
+  workerId     String? @unique @map("worker_id") // worker identifier (#7)
+  firstName    String  @map("first_name")
+  lastName     String  @map("last_name")
+  email        String  @unique
+  mobile       String  @unique
+  passwordHash String? @map("password_hash")
+
+  // Denormalised primary role for the auth fast-path; the normalised record is
+  // member_role → system_role (kept in sync by the seed / provisioning).
+  circleRole CircleRole @default(worker) @map("circle_role")
+  role       AppRole    @default(worker)
+
+  dob                String?
+  gender             Gender?
+  industry           String?
+  isHSR              Boolean @default(false) @map("is_hsr")
+  workerNumber       String? @map("worker_number")
+  nzbn               String?
+  organisation       String?
+  verificationStatus String  @default("verified") @map("verification_status")
+
+  companyId   String?  @map("company_id")
+  company     Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  companyName String?  @map("company_name")
+
+  supervisorId   String?   @map("supervisor_id")
+  supervisor     Member?   @relation("Supervision", fields: [supervisorId], references: [id], onDelete: SetNull)
+  crewMembers    Member[]  @relation("Supervision")
+  supervisorName String?   @map("supervisor_name")
+  crew           String?
+  approval       Approval?
+  initials       String?
+  avatarColor    String?   @map("avatar_color")
+
+  roles            MemberRole[]
+  concernsReported Concern[]          @relation("Reporter")
+  concernsAssigned Concern[]          @relation("Supervisor")
+  actions          CorrectiveAction[]
+  notifications    Notification[]
+  syncEvents       SyncEvent[]
+  uploads          MediaAsset[]
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("member")
+}
+
+model MemberRole {
+  id       String     @id @default(cuid())
+  memberId String     @map("member_id")
+  member   Member     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  roleId   String     @map("role_id")
+  role     SystemRole @relation(fields: [roleId], references: [id])
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@unique([memberId, roleId])
+  @@map("member_role")
+}
+
+// ─────────────────────────── content library & quick links (#4, #5, #6) ───────────────────────────
+model MediaAsset {
+  id               String      @id @default(cuid())
+  title            String
+  description      String      @default("")
+  mediaTypeId      String      @map("media_type_id")
+  mediaType        MediaType   @relation(fields: [mediaTypeId], references: [id])
+  mimeTypeId       String      @map("mime_type_id")
+  mimeType         MimeType    @relation(fields: [mimeTypeId], references: [id])
+  storageKey       String      @map("storage_key")
+  storageUrl       String      @map("storage_url")
+  originalFilename String      @map("original_filename")
+  sizeBytes        Int         @map("size_bytes") // ≤ 104857600 (100 MB) — CHECK in migration (#4)
+  uploadedById     String      @map("uploaded_by")
+  uploadedBy       Member      @relation(fields: [uploadedById], references: [id])
+  quickLinks       QuickLink[]
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("media_asset")
+}
+
+model QuickLink {
+  id          String        @id @default(cuid())
+  title       String
+  typeId      String        @map("quick_link_type_id")
+  type        QuickLinkType @relation(fields: [typeId], references: [id])
+  mediaId     String?       @map("media_id")
+  media       MediaAsset?   @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  externalUrl String?       @map("external_url")
+  sortOrder   Int           @default(0) @map("sort_order")
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("quick_link")
+}
+
+// ─────────────────────────── core: the concern loop ───────────────────────────
+model Concern {
+  id          String  @id @default(cuid())
+  ref         String  @unique
+  clientId    String? @unique @map("client_id")
+  categoryId  String  @map("primary_category_id") // primary risk (denormalised)
+  description String  @default("")
+
+  status    ConcernStatus @default(open)
+  sceneDate String?       @map("scene_date")
+
+  reportedById      String   @map("reported_by_id")
+  reportedBy        Member   @relation("Reporter", fields: [reportedById], references: [id])
+  reportedByName    String   @map("reported_by_name")
+  reportedAnonymous Boolean  @default(false) @map("reported_anonymous")
+  reportedAt        DateTime @default(now()) @map("reported_at")
+
+  supervisorId String? @map("supervisor_id")
+  supervisor   Member? @relation("Supervisor", fields: [supervisorId], references: [id], onDelete: SetNull)
+  assignedTo   String? @map("assigned_to")
+
+  companyId String? @map("company_id")
+  nzbn      String?
+
+  closedAt         String?   @map("closed_at")
+  closedAtIso      DateTime? @map("closed_at_iso")
+  timeToCloseHours Float?    @map("time_to_close_hours")
+  riskReduction    String?   @map("risk_reduction")
+
+  offline       Boolean        @default(false)
+  captureStatus CaptureStatus? @map("capture_status")
+  capturedAt    DateTime?      @map("captured_at")
+  syncedAt      DateTime?      @map("synced_at")
+
+  risks   ConcernRisk[]
+  photos  ConcernPhoto[]
+  actions CorrectiveAction[]
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@index([supervisorId])
+  @@index([reportedById])
+  @@index([status])
+  @@map("concern")
+}
+
+model ConcernRisk {
+  id         String         @id @default(cuid())
+  concernId  String         @map("concern_id")
+  concern    Concern        @relation(fields: [concernId], references: [id], onDelete: Cascade)
+  categoryId String         @map("category_id")
+  category   HazardCategory @relation(fields: [categoryId], references: [id])
+  isPrimary  Boolean        @default(false) @map("is_primary")
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@unique([concernId, categoryId])
+  @@map("concern_risk")
+}
+
+model ConcernPhoto {
+  id        String  @id @default(cuid())
+  concernId String  @map("concern_id")
+  concern   Concern @relation(fields: [concernId], references: [id], onDelete: Cascade)
+  dataUrl   String  @map("data_url") // worker-captured photo (#8)
+  sortOrder Int     @default(0) @map("sort_order")
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("concern_photo")
+}
+
+model CorrectiveAction {
+  id           String            @id @default(cuid())
+  concernId    String            @map("concern_id")
+  concern      Concern           @relation(fields: [concernId], references: [id], onDelete: Cascade)
+  authorId     String?           @map("author_id")
+  author       Member?           @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  authorName   String            @map("author_name")
+  role         AppRole
+  message      String
+  at           DateTime          @default(now())
+  promptId     String?           @map("prompt_id")
+  prompt       SupervisorPrompt? @relation(fields: [promptId], references: [id])
+  responseType ResponseType      @map("response_type")
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@index([concernId])
+  @@map("corrective_action")
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  recipientId String?          @map("recipient_id")
+  recipient   Member?          @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+  kind        NotificationKind
+  title       String
+  body        String
+  concernRef  String?          @map("concern_ref")
+  read        Boolean          @default(false)
+  at          DateTime         @default(now())
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@index([recipientId])
+  @@map("notification")
+}
+
+model SyncEvent {
+  id       String     @id @default(cuid())
+  memberId String?    @map("member_id")
+  member   Member?    @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  result   SyncResult
+  count    Int        @default(0)
+  message  String?
+  at       DateTime   @default(now())
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@index([memberId])
+  @@map("sync_event")
+}
+
+model ErrorLog {
+  id       String  @id @default(cuid())
+  code     String
+  message  String
+  entity   String?
+  entityId String? @map("entity_id")
+  retries  Int     @default(0)
+  resolved Boolean @default(false)
+  at       DateTime @default(now())
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isDisabled Boolean   @default(false) @map("is_disabled")
+  isDeleted  Boolean   @default(false) @map("is_deleted")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  createdBy  String?   @map("created_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedBy  String?   @map("updated_by")
+  deletedAt  DateTime? @map("deleted_at")
+  deletedBy  String?   @map("deleted_by")
+
+  @@map("error_log")
+}
+
+// ─────────────────────────── field-level audit trail (#13) ───────────────────────────
+model AuditLog {
+  id       String      @id @default(cuid())
+  entity   String // table (model) name
+  entityId String      @map("entity_id")
+  action   AuditAction
+  changes  Json? // { field: { old, new } } / written data
+  actorId  String?     @map("actor_id")
+  at       DateTime    @default(now())
+
+  @@index([entity, entityId])
+  @@map("audit_log")
+}
