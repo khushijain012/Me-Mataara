@@ -1,0 +1,233 @@
+===============================================================================
+USER HIERARCHY + REMAINING WORK - EFFORT AND IMPACT
+Me Mataara / NQR
+Prepared: 18 August 2026
+===============================================================================
+
+
+-------------------------------------------------------------------------------
+1. THE SHORT VERSION
+-------------------------------------------------------------------------------
+
+Building the full user hierarchy takes about 6 to 8 weeks with one developer,
+or about 4 weeks with two.
+
+Everything else still needed to reach a live, production V1 takes about
+12 to 16 weeks on top of that with one developer.
+
+All up: roughly 4.5 to 6 months with one developer, or 2.5 to 3.5 months with
+two developers plus part-time testing.
+
+The most important point is not the org chart itself. It is the access control
+that comes with it. Right now any admin user can see every safety concern and
+every person in EVERY business on the platform. Until that is fixed we can only
+safely run one company. That single issue is what blocks signing up a second
+customer.
+
+
+-------------------------------------------------------------------------------
+2. WHAT WE ALREADY HAVE
+-------------------------------------------------------------------------------
+
+More is built than the old plan document suggests. Today the app has:
+
+  * Worker to Supervisor link. A worker picks their supervisor at sign-up and
+    their concerns route to that person. This works.
+
+  * A Company record per NZBN business.
+
+  * Four role names in the system (Platform Owner, Company Owner, Supervisor,
+    Worker), squashed down to three in the app (Worker, Supervisor, Admin).
+
+  * A basic admin Users screen - list people, add a person, delete a person.
+
+  * Working login, concern reporting, supervisor responses, closing the loop,
+    notifications and analytics.
+
+In short: a flat two-level structure (worker under supervisor) plus a company
+name attached to each person. That is roughly 40% of a real hierarchy.
+
+
+-------------------------------------------------------------------------------
+3. WHAT IS MISSING
+-------------------------------------------------------------------------------
+
+3.1  The Company Owner level does not exist at all.
+     The role name is defined, but nothing in the system treats it differently.
+     A Company Owner is currently handed full platform admin access.
+
+3.2  There is no separation between companies.
+     An admin sees all concerns from all businesses, and all analytics across
+     all businesses. There is no "you only see your own company" rule anywhere
+     in the system. This is the single biggest gap.
+
+3.3  Sites and crews are just text.
+     "Crew" is a free-text box on a person. "Sites" is only a number on the
+     company. There is no real structure, so we cannot route by site, move a
+     worker between crews, or hand a crew over when a supervisor leaves.
+
+3.4  There is no way to manage the relationships once they are set.
+     No approve, no reject, no reassign a worker to a different supervisor,
+     no invite, no deactivate. A supervisor awaiting approval is currently
+     invisible in the app and there is no screen to approve them.
+
+3.5  A minor security leak.
+     The list of supervisors is served without requiring login, and it is not
+     filtered by company. Anyone can read every supervisor's name and crew.
+
+
+-------------------------------------------------------------------------------
+4. EFFORT - THE HIERARCHY WORK
+-------------------------------------------------------------------------------
+
+One developer, working days.
+
+  Database changes: real Site and Crew records, the Company Owner
+  level, and migrating existing data across ......................  3 - 4 days
+
+  Apply "you only see your own company" across every screen
+  and every report ...............................................  4 - 5 days
+
+  Rebuild the permission checks so they use the proper role
+  records instead of the current shortcut ........................  2 - 3 days
+
+  New functions: assign and reassign a supervisor, approve or
+  reject, invite, deactivate, hand over a crew ...................  4 - 5 days
+
+  New Company Owner experience in the app (menu, dashboard,
+  their own analytics) ...........................................  5 - 6 days
+
+  Upgrade the admin Users screen: edit a person, change a role,
+  reassign, an approvals queue, search and paging ................  4 - 5 days
+
+  Close the supervisor list leak .................................  1 day
+
+  Testing that every role sees exactly what it should and
+  nothing more ...................................................  3 - 4 days
+
+  TOTAL .........................................................  27 - 38 days
+                                                   (6 - 8 weeks, one developer)
+
+
+-------------------------------------------------------------------------------
+5. EFFORT - EVERYTHING ELSE STILL OUTSTANDING
+-------------------------------------------------------------------------------
+
+One developer, working days.
+
+  Login and sign-in
+    Move to Circle single sign-on when it is ready ...............  5 - 8 days
+    (Or 2 - 3 days to harden our own login instead. Worth noting: the
+    current login reads every user account out of the database on each
+    attempt, and there is no limit on repeated password guesses.)
+
+  Photos
+    Move photos out of the database and into proper file storage,
+    with virus scanning and location data stripped ...............  5 - 7 days
+    (Photos are currently stored inside the database as text, which
+    will not scale.)
+
+  Working offline
+    Hold reports on the phone with no signal and send them
+    automatically when signal returns ............................ 8 - 10 days
+    (The server side is ready. The phone side is not built.)
+
+  Push notifications .............................................  4 - 5 days
+    (Nothing built yet.)
+
+  Live NZBN business lookup ......................................  3 - 4 days
+    (Currently searches our own database, not the government register.)
+
+  Analytics hardening: company filtering, a minimum group size so
+  small teams cannot be identified, and CSV / Excel / PDF export ..  6 - 8 days
+
+  Privacy review of anonymous reporting, and support for the
+  formal privacy assessment ......................................  3 - 5 days
+
+  Automated tests ................................................ 8 - 10 days
+    (There are currently no tests at all.)
+
+  Deployment pipeline, environments, secret storage, monitoring ...  6 - 8 days
+
+  New Zealand hosting setup ......................................  3 - 5 days
+    (Plus lead time for procurement.)
+
+  Security review and fixing what it finds .......................  5 - 8 days
+    (Plus the cost of an external tester.)
+
+  Speed and scale: paging on long lists, database indexes ........  3 - 4 days
+
+  TOTAL .........................................................  59 - 82 days
+                                                (12 - 16 weeks, one developer)
+
+
+-------------------------------------------------------------------------------
+6. IMPACT - WHY THIS MATTERS
+-------------------------------------------------------------------------------
+
+Privacy and compliance
+    This is ACC-funded and covered by the Privacy Act 2020. Today an admin
+    account can read every worker's safety concern in every business. That is
+    the highest risk item in the whole system. It is not a hypothetical - it
+    is how the code behaves right now.
+
+Commercial
+    We cannot sign up a second business until company separation is in place,
+    because their data would be visible to each other's admins. This is a yes
+    or no gate on rollout, not a nice-to-have.
+
+Effect on existing work
+    This change takes things away rather than adds them - people who can see
+    everything today will see less afterwards. That means existing data has to
+    be migrated and every screen re-tested. It cannot be quietly switched on
+    behind a flag the way a new feature can.
+
+Effect on the app
+    The Company Owner level is a whole new fourth experience in the app -
+    its own menu, its own dashboard, its own version of the reports.
+
+Risk of wasted work
+    If Circle ends up owning all accounts and the reporting structure, as the
+    original plan assumed, then roughly a third of the hierarchy work - the
+    invite, approval and user-creation screens - gets thrown away. The company
+    separation and permission work survives either way.
+
+
+-------------------------------------------------------------------------------
+7. RECOMMENDATION
+-------------------------------------------------------------------------------
+
+Split the work in two and put the Circle decision in the middle.
+
+  STAGE A - about 3 weeks
+      Company separation, the permission rebuild, supervisor assignment and
+      approval, and closing the supervisor list leak.
+      This is worth doing whatever happens with Circle, and it closes the
+      privacy gap.
+
+  DECISION POINT
+      Confirm whether Circle is going ahead, and whether Company Owner needs
+      its own experience.
+
+  STAGE B - about 3 to 5 weeks
+      Company Owner experience, sites and crews, and account creation - but
+      only the parts Circle will not be handling.
+
+
+-------------------------------------------------------------------------------
+8. QUESTIONS FOR THE CLIENT
+-------------------------------------------------------------------------------
+
+  1. Is Circle definitely going ahead, and when will it be ready?
+     This decides whether we build account management or just read from theirs.
+
+  2. Does a Company Owner need their own screens, or is treating them as an
+     admin acceptable for the first release?
+
+  3. Do we need site-level detail, or is crew-level enough?
+
+  4. Is New Zealand data hosting a hard requirement?
+
+  5. Are photos definitely in the first release?
+
+===============================================================================

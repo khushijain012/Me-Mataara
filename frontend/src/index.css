@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-sand-50 text-ink font-sans antialiased;
+    background-image:
+      radial-gradient(1200px 600px at 100% -10%, rgba(79, 135, 143, 0.12), transparent),
+      radial-gradient(900px 500px at -10% 110%, rgba(186, 185, 180, 0.18), transparent);
+    background-attachment: fixed;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
+  }
+
+  /* Respect device notches on installed PWA */
+  .safe-top {
+    padding-top: max(1rem, env(safe-area-inset-top));
+  }
+  .safe-bottom {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl bg-white/90 shadow-card ring-1 ring-black/5 backdrop-blur-sm;
+  }
+
+  .field-label {
+    @apply mb-1.5 block text-sm font-semibold text-ink-soft;
+  }
+
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pounamu-500 focus-visible:ring-offset-2 focus-visible:ring-offset-sand-50;
+  }
+}
+
+/* Thin, unobtrusive scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(79, 135, 143, 0.35) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(79, 135, 143, 0.3);
+  border-radius: 9999px;
+}

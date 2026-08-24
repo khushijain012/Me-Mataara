@@ -1,0 +1,35 @@
+{
+  "name": "me-mataara-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Me Mataara / NQR — workspace root. Runs the frontend PWA (frontend/) and the domain API (backend/) from one place.",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:web": "npm run dev --workspace=frontend",
+    "dev:api": "npm run dev --workspace=backend",
+    "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
+    "build:web": "npm run build --workspace=frontend",
+    "build:api": "npm run build --workspace=backend",
+    "start": "npm run start --workspace=backend",
+    "preview": "npm run preview --workspace=frontend",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "gen:icons": "npm run gen:icons --workspace=frontend",
+    "prisma:generate": "npm run prisma:generate --workspace=backend",
+    "prisma:migrate": "npm run prisma:migrate --workspace=backend",
+    "prisma:deploy": "npm run prisma:deploy --workspace=backend",
+    "db:seed": "npm run db:seed --workspace=backend",
+    "db:reset": "npm run db:reset --workspace=backend",
+    "photos:backfill": "npm run photos:backfill --workspace=backend",
+    "photos:purge": "npm run photos:purge --workspace=backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
